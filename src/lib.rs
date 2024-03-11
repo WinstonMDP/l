@@ -5,7 +5,7 @@ use std::{
 };
 
 /// Global assertion
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct GA {
     a: A,
     var_to_set: HashMap<String, String>,
@@ -13,7 +13,7 @@ pub struct GA {
 }
 
 /// Assertion
-#[derive(Clone, PartialEq, Debug, Ord, PartialOrd, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct A {
     set: String,
     f: F,
@@ -32,7 +32,7 @@ impl Default for A {
 }
 
 /// Formula
-#[derive(Clone, PartialEq, Debug, Ord, PartialOrd, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum F {
     Complex { constant: String, args: Vec<F> },
     Var(String),
@@ -52,7 +52,7 @@ pub struct D {
 }
 
 /// Template
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum T {
     Complex { constant: String, args: Vec<T> },
     Var(usize),
@@ -225,6 +225,7 @@ fn substs_check(
             }
         }
     }
+    hyps.sort_unstable();
     Ok(hyps)
 }
 
@@ -243,10 +244,12 @@ fn vars(f: &F, acc: &mut HashSet<String>) {
 
 fn scroll(hyps: &mut Vec<A>, proof_stack: &mut Vec<A>) -> Result<()> {
     while let Some(hyp) = hyps.pop() {
+        let top = proof_stack
+            .pop()
+            .with_context(|| format!("Proof stack is empty, but not hyps: {hyps:?}."))?;
         anyhow::ensure!(
-            hyp == proof_stack
-                .pop()
-                .with_context(|| format!("Proof stack is empty, but not hyps: {hyps:?}"))?
+            hyp == top,
+            "Not matching hyp: {hyp:?} and proof stack top: {top:?}."
         );
     }
     Ok(())
@@ -260,10 +263,10 @@ fn subst(f: &mut F, substs: &HashMap<String, F>) -> Result<()> {
             }
         }
         F::Var(name) => {
-            let subst_f = substs
+            *f = substs
                 .get(name)
-                .with_context(|| format!("There is no {name} in substs."))?;
-            *f = subst_f.clone();
+                .with_context(|| format!("There isn't {name} in substs."))?
+                .clone();
         }
     }
     Ok(())
