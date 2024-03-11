@@ -1,36 +1,34 @@
-use std::collections::{HashMap, HashSet};
+use anyhow::{Context, Result};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
-use anyhow::{ensure, Context, Result};
-
-/// Global asertion
-#[derive(Clone, PartialEq, Debug)]
+/// Global assertion
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct GA {
     a: A,
-    vars: HashMap<String, String>, // name -> set
+    var_to_set: HashMap<String, String>,
     disjs: HashMap<String, HashSet<String>>,
 }
 
-impl Default for GA {
-    fn default() -> Self {
-        GA {
-            a: A {
-                set: String::new(),
-                f: F::Complex {
-                    constant: String::new(),
-                    args: vec![],
-                },
-            },
-            vars: HashMap::new(),
-            disjs: HashMap::new(),
-        }
-    }
-}
-
-/// Assretion
+/// Assertion
 #[derive(Clone, PartialEq, Debug, Ord, PartialOrd, Eq)]
 pub struct A {
     set: String,
     f: F,
+}
+
+impl Default for A {
+    fn default() -> Self {
+        A {
+            set: String::new(),
+            f: F::Complex {
+                constant: String::new(),
+                args: vec![],
+            },
+        }
+    }
 }
 
 /// Formula
@@ -38,6 +36,26 @@ pub struct A {
 pub enum F {
     Complex { constant: String, args: Vec<F> },
     Var(String),
+}
+
+/// Rule
+#[derive(Clone)]
+pub struct R {
+    ga: GA,
+    hyps: Vec<A>,
+}
+
+/// Definition
+pub struct D {
+    constant: String,
+    t: T,
+}
+
+/// Template
+#[derive(Clone, Debug)]
+pub enum T {
+    Complex { constant: String, args: Vec<T> },
+    Var(usize),
 }
 
 pub enum Step {
@@ -49,114 +67,187 @@ pub enum Step {
         i: usize,
         substs: HashMap<String, F>,
     },
+    D {
+        i: usize,
+    },
 }
 
-/// Rule
-#[derive(Clone)]
-pub struct R {
-    pub hyps: Vec<A>,
-    pub head: A,
-    vars: HashMap<String, String>, // name -> set
-    disjs: HashMap<String, HashSet<String>>,
-}
-
+#[allow(clippy::implicit_hasher)]
 pub fn process(
-    context: (&[GA], &[R]),
-    vars_map: &HashMap<String, String>,
+    context: (&[GA], &[R], &[D]),
+    var_to_set: &HashMap<String, String>,
     steps: &[Step],
 ) -> Result<Vec<A>> {
     let mut proof_stack = vec![];
-    let mut disjs: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut disjs = HashMap::new();
     for step in steps {
         match step {
             Step::A { i, substs } => {
-                let mut ga = context.0[*i].clone();
+                let mut ga = context
+                    .0
+                    .get(*i)
+                    .with_context(|| format!("There isn't {i} in ga context."))?
+                    .clone();
                 scroll(
-                    &mut disj_check(vars_map, &ga.vars, &ga.disjs, substs, &mut disjs)?,
+                    &mut substs_check(substs, var_to_set, &ga.var_to_set, &mut disjs, &ga.disjs)?,
                     &mut proof_stack,
                 )?;
                 subst(&mut ga.a.f, substs)?;
                 proof_stack.push(ga.a);
             }
             Step::R { i, substs } => {
-                let mut r = context.1[*i].clone();
+                let mut r = context
+                    .1
+                    .get(*i)
+                    .with_context(|| format!("There isn't {i} in r context."))?
+                    .clone();
                 scroll(
-                    &mut disj_check(vars_map, &r.vars, &r.disjs, substs, &mut disjs)?,
+                    &mut substs_check(
+                        substs,
+                        var_to_set,
+                        &r.ga.var_to_set,
+                        &mut disjs,
+                        &r.ga.disjs,
+                    )?,
                     &mut proof_stack,
                 )?;
-                println!("substs: {substs:?}");
                 for hyp in &mut r.hyps {
                     subst(&mut hyp.f, substs)?;
                 }
                 scroll(&mut r.hyps, &mut proof_stack)?;
-                subst(&mut r.head.f, substs)?;
-                proof_stack.push(r.head);
+                subst(&mut r.ga.a.f, substs)?;
+                proof_stack.push(r.ga.a);
             }
+            Step::D { i } => unfold(
+                &mut proof_stack.last_mut().context("Empty proof context.")?.f,
+                context
+                    .2
+                    .get(*i)
+                    .with_context(|| format!("There isn't {i} in d context."))?,
+            )?,
         }
     }
     Ok(proof_stack)
 }
 
-// Order of result
-fn disj_check(
-    g_vars_map: &HashMap<String, String>,
-    vars_map: &HashMap<String, String>,
-    from_disjs: &HashMap<String, HashSet<String>>,
+fn unfold(f: &mut F, d: &D) -> Result<()> {
+    if let F::Complex { constant, args } = f {
+        if constant == &d.constant {
+            *f = complete(d.t.clone(), args)?;
+        } else {
+            for arg in args {
+                unfold(arg, d)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Like ``subst()``, but for ``T``
+fn complete(t: T, f_args: &[F]) -> Result<F> {
+    Ok(match t {
+        T::Complex { constant, args } => F::Complex {
+            constant,
+            args: args
+                .into_iter()
+                .map(|x| complete(x, f_args))
+                .collect::<Result<Vec<F>>>()?,
+        },
+        T::Var(i) => f_args
+            .get(i)
+            .with_context(|| format!("There isn't enough args in {f_args:?} for {t:?}."))?
+            .clone(),
+    })
+}
+
+fn substs_check(
     substs: &HashMap<String, F>,
-    to_disjs: &mut HashMap<String, HashSet<String>>,
+    g_var_to_set: &HashMap<String, String>,
+    var_to_set: &HashMap<String, String>,
+    g_disjs: &mut HashMap<String, HashSet<String>>,
+    disjs: &HashMap<String, HashSet<String>>,
 ) -> Result<Vec<A>> {
     let mut hyps = vec![];
-    for (name, f) in substs {
-        let set = vars_map.get(name).unwrap().to_string();
+    for (var, f) in substs {
+        let set = var_to_set
+            .get(var)
+            .with_context(|| format!("{var} isn't declared."))?
+            .to_string();
         let proven = if let F::Var(name) = f {
-            *g_vars_map.get(name).unwrap() == set
+            g_var_to_set
+                .get(name)
+                .with_context(|| format!("{name} isn't declared."))?
+                == &set
         } else {
             false
         };
         if !proven {
             hyps.push(A { set, f: f.clone() });
         }
-        if let Some(disjs) = from_disjs.get(name) {
-            for disj in disjs {
-                let disj_f = substs.get(disj).unwrap();
-                for f_var in vars(f) {
-                    for disj_f_var in vars(disj_f) {
-                        match f_var.cmp(&disj_f_var) {
-                            std::cmp::Ordering::Less => {
-                                to_disjs.get_mut(&f_var).unwrap().insert(disj_f_var);
+        if let Some(var_disjs) = disjs.get(var) {
+            for var_disj in var_disjs {
+                let mut f_vars = HashSet::new();
+                vars(f, &mut f_vars);
+                let mut disj_f_vars = HashSet::new();
+                vars(
+                    substs
+                        .get(var_disj)
+                        .with_context(|| format!("There isn't {var_disj} in substs."))?,
+                    &mut disj_f_vars,
+                );
+                for f_var in f_vars {
+                    for disj_f_var in &disj_f_vars {
+                        match f_var.cmp(disj_f_var) {
+                            Ordering::Less => match g_disjs.get_mut(&f_var) {
+                                Some(r) => {
+                                    r.insert(disj_f_var.clone());
+                                }
+                                None => {
+                                    g_disjs
+                                        .insert(f_var.clone(), HashSet::from([disj_f_var.clone()]));
+                                }
+                            },
+                            Ordering::Equal => {
+                                anyhow::bail!("Disj check failed with {f_var} and {disj_f_var}")
                             }
-                            std::cmp::Ordering::Equal => anyhow::bail!(""),
-                            std::cmp::Ordering::Greater => {
-                                to_disjs.get_mut(&disj_f_var).unwrap().insert(f_var.clone());
-                            }
-                        };
+                            Ordering::Greater => match g_disjs.get_mut(disj_f_var) {
+                                Some(r) => {
+                                    r.insert(f_var.clone());
+                                }
+                                None => {
+                                    g_disjs
+                                        .insert(disj_f_var.clone(), HashSet::from([f_var.clone()]));
+                                }
+                            },
+                        }
                     }
                 }
             }
         }
     }
-    hyps.sort_unstable();
     Ok(hyps)
 }
 
-fn vars(f: &F) -> HashSet<String> {
+fn vars(f: &F, acc: &mut HashSet<String>) {
     match f {
         F::Complex { args, .. } => {
-            let mut acc = HashSet::new();
             for arg in args {
-                acc.extend(vars(arg));
+                vars(arg, acc);
             }
-            acc
         }
-        F::Var(name) => HashSet::from([name.clone()]),
+        F::Var(name) => {
+            acc.insert(name.clone());
+        }
     }
 }
 
 fn scroll(hyps: &mut Vec<A>, proof_stack: &mut Vec<A>) -> Result<()> {
-    println!("hyps: {hyps:?}");
-    println!("proof_stack: {proof_stack:?}");
     while let Some(hyp) = hyps.pop() {
-        ensure!(hyp == proof_stack.pop().context("")?);
+        anyhow::ensure!(
+            hyp == proof_stack
+                .pop()
+                .with_context(|| format!("Proof stack is empty, but not hyps: {hyps:?}"))?
+        );
     }
     Ok(())
 }
@@ -169,7 +260,9 @@ fn subst(f: &mut F, substs: &HashMap<String, F>) -> Result<()> {
             }
         }
         F::Var(name) => {
-            let subst_f = substs.get(name).unwrap();
+            let subst_f = substs
+                .get(name)
+                .with_context(|| format!("There is no {name} in substs."))?;
             *f = subst_f.clone();
         }
     }

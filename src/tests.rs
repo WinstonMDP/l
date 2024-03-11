@@ -15,15 +15,17 @@ fn mp() -> R {
                 },
             },
         ],
-        head: A {
-            set: "p".to_string(),
-            f: F::Var("y".to_string()),
+        ga: GA {
+            a: A {
+                set: "p".to_string(),
+                f: F::Var("y".to_string()),
+            },
+            var_to_set: HashMap::from([
+                ("x".to_string(), "wff".to_string()),
+                ("y".to_string(), "wff".to_string()),
+            ]),
+            disjs: HashMap::new(),
         },
-        vars: HashMap::from([
-            ("x".to_string(), "wff".to_string()),
-            ("y".to_string(), "wff".to_string()),
-        ]),
-        disjs: HashMap::new(),
     }
 }
 
@@ -42,6 +44,7 @@ fn process_t_1() {
                     },
                     ..Default::default()
                 }],
+                &[],
                 &[]
             ),
             &HashMap::new(),
@@ -117,7 +120,8 @@ fn process_t_2() {
                         ..Default::default()
                     }
                 ],
-                &[mp()]
+                &[mp()],
+                &[]
             ),
             &HashMap::new(),
             &[
@@ -180,7 +184,7 @@ fn process_t_3() {
                             set: "p".to_string(),
                             f: F::Var("q".to_string()),
                         },
-                        vars: HashMap::from([("q".to_string(), "wff".to_string())]),
+                        var_to_set: HashMap::from([("q".to_string(), "wff".to_string())]),
                         ..Default::default()
                     },
                     GA {
@@ -191,14 +195,15 @@ fn process_t_3() {
                                 args: vec![F::Var("x".to_string()), F::Var("y".to_string()),],
                             },
                         },
-                        vars: HashMap::from([
+                        var_to_set: HashMap::from([
                             ("x".to_string(), "wff".to_string()),
                             ("y".to_string(), "wff".to_string())
                         ]),
                         ..Default::default()
                     },
                 ],
-                &[mp()]
+                &[mp()],
+                &[]
             ),
             &HashMap::from([
                 ("z".to_string(), "wff".to_string()),
@@ -245,12 +250,13 @@ fn process_t_4() {
                         args: vec![F::Var("x".to_string()), F::Var("y".to_string())],
                     },
                 },
-                vars: HashMap::from([
+                var_to_set: HashMap::from([
                     ("x".to_string(), "wff".to_string()),
                     ("y".to_string(), "wff".to_string()),
                 ]),
                 disjs: HashMap::from([("x".to_string(), HashSet::from(["y".to_string()]))]),
             }],
+            &[],
             &[],
         ),
         &HashMap::from([("x".to_string(), "wff".to_string())]),
@@ -277,12 +283,13 @@ fn process_t_5() {
                         args: vec![F::Var("x".to_string()), F::Var("y".to_string())],
                     },
                 },
-                vars: HashMap::from([
+                var_to_set: HashMap::from([
                     ("x".to_string(), "wff".to_string()),
                     ("y".to_string(), "wff".to_string()),
                 ]),
                 disjs: HashMap::from([("x".to_string(), HashSet::from(["y".to_string()]))]),
             }],
+            &[],
             &[],
         ),
         &HashMap::from([("x".to_string(), "wff".to_string())]),
@@ -307,4 +314,199 @@ fn process_t_5() {
         }],
     )
     .unwrap_err();
+}
+
+#[test]
+fn process_t_6() {
+    assert_eq!(
+        process(
+            (
+                &[GA {
+                    a: A {
+                        set: "p".to_string(),
+                        f: F::Complex {
+                            constant: "imp".to_string(),
+                            args: vec![F::Var("x".to_string()), F::Var("y".to_string())],
+                        },
+                    },
+                    var_to_set: HashMap::from([
+                        ("x".to_string(), "wff".to_string()),
+                        ("y".to_string(), "wff".to_string()),
+                    ]),
+                    disjs: HashMap::new(),
+                }],
+                &[],
+                &[D {
+                    constant: "imp".to_string(),
+                    t: T::Complex {
+                        constant: "or".to_string(),
+                        args: vec![
+                            T::Complex {
+                                constant: "not".to_string(),
+                                args: vec![T::Var(0)],
+                            },
+                            T::Var(1),
+                        ],
+                    },
+                }],
+            ),
+            &HashMap::from([
+                ("x".to_string(), "wff".to_string()),
+                ("y".to_string(), "wff".to_string())
+            ]),
+            &[
+                Step::A {
+                    i: 0,
+                    substs: HashMap::from([
+                        ("x".to_string(), F::Var("x".to_string())),
+                        ("y".to_string(), F::Var("y".to_string())),
+                    ]),
+                },
+                Step::D { i: 0 },
+            ],
+        )
+        .unwrap(),
+        vec![A {
+            set: "p".to_string(),
+            f: F::Complex {
+                constant: "or".to_string(),
+                args: vec![
+                    F::Complex {
+                        constant: "not".to_string(),
+                        args: vec![F::Var("x".to_string())],
+                    },
+                    F::Var("y".to_string()),
+                ]
+            }
+        }]
+    );
+}
+
+#[test]
+fn process_t_7() {
+    assert_eq!(
+        process(
+            (
+                &[
+                    GA {
+                        a: A {
+                            set: "p".to_string(),
+                            f: F::Complex {
+                                constant: "imp".to_string(),
+                                args: vec![F::Var("x".to_string()), F::Var("y".to_string())],
+                            },
+                        },
+                        var_to_set: HashMap::from([
+                            ("x".to_string(), "wff".to_string()),
+                            ("y".to_string(), "wff".to_string()),
+                            ("z".to_string(), "wff".to_string()),
+                        ]),
+                        disjs: HashMap::from([("x".to_string(), HashSet::from(["z".to_string()]))]),
+                    },
+                    GA {
+                        a: A {
+                            set: "wff".to_string(),
+                            f: F::Complex {
+                                constant: "T".to_string(),
+                                args: vec![F::Var("x".to_string())],
+                            }
+                        },
+                        var_to_set: HashMap::from([("x".to_string(), "wff".to_string())]),
+                        disjs: HashMap::new()
+                    }
+                ],
+                &[],
+                &[],
+            ),
+            &HashMap::from([
+                ("x".to_string(), "wff".to_string()),
+                ("z".to_string(), "wff".to_string()),
+            ]),
+            &[
+                Step::A {
+                    i: 1,
+                    substs: HashMap::from([("x".to_string(), F::Var("x".to_string()))]),
+                },
+                Step::A {
+                    i: 1,
+                    substs: HashMap::from([("x".to_string(), F::Var("x".to_string()))]),
+                },
+                Step::A {
+                    i: 0,
+                    substs: HashMap::from([
+                        (
+                            "x".to_string(),
+                            F::Complex {
+                                constant: "T".to_string(),
+                                args: vec![F::Var("x".to_string())],
+                            },
+                        ),
+                        (
+                            "y".to_string(),
+                            F::Complex {
+                                constant: "T".to_string(),
+                                args: vec![F::Var("x".to_string())],
+                            },
+                        ),
+                        ("z".to_string(), F::Var("z".to_string()))
+                    ]),
+                },
+            ],
+        )
+        .unwrap(),
+        vec![A {
+            set: "p".to_string(),
+            f: F::Complex {
+                constant: "imp".to_string(),
+                args: vec![
+                    F::Complex {
+                        constant: "T".to_string(),
+                        args: vec![F::Var("x".to_string())],
+                    },
+                    F::Complex {
+                        constant: "T".to_string(),
+                        args: vec![F::Var("x".to_string())],
+                    }
+                ]
+            }
+        }]
+    );
+}
+
+#[test]
+fn process_t_8() {
+    process(
+        (
+            &[GA {
+                a: A {
+                    set: "p".to_string(),
+                    f: F::Complex {
+                        constant: "imp".to_string(),
+                        args: vec![F::Var("x".to_string()), F::Var("y".to_string())],
+                    },
+                },
+                var_to_set: HashMap::from([
+                    ("x".to_string(), "wff".to_string()),
+                    ("y".to_string(), "wff".to_string()),
+                    ("z".to_string(), "wff".to_string()),
+                ]),
+                disjs: HashMap::from([("x".to_string(), HashSet::from(["z".to_string()]))]),
+            }],
+            &[],
+            &[],
+        ),
+        &HashMap::from([
+            ("x".to_string(), "wff".to_string()),
+            ("z".to_string(), "wff".to_string()),
+        ]),
+        &[Step::A {
+            i: 0,
+            substs: HashMap::from([
+                ("x".to_string(), F::Var("x".to_string())),
+                ("y".to_string(), F::Var("x".to_string())),
+                ("z".to_string(), F::Var("z".to_string())),
+            ]),
+        }],
+    )
+    .unwrap();
 }
